@@ -1,0 +1,17 @@
+# Virtual environment — don't upload this (too large)
+venv/
+
+# Model weights — too large for GitHub
+model/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code settings
+.vscode/
+
+# Windows junk
+Thumbs.db
+desktop.ini

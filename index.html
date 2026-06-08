@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Road Damage Detector</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1e293b;
+      padding: 16px 32px;
+      border-bottom: 1px solid #334155;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #f1f5f9;
+    }
+
+    header span {
+      font-size: 13px;
+      color: #64748b;
+    }
+
+    .badge {
+      background: #22c55e20;
+      color: #22c55e;
+      border: 1px solid #22c55e40;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      margin-left: auto;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 32px auto;
+      padding: 0 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 768px) {
+      .container { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    .card h2 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 16px;
+    }
+
+    /* Upload zone */
+    .upload-zone {
+      border: 2px dashed #334155;
+      border-radius: 8px;
+      padding: 40px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: #3b82f6;
+      background: #3b82f610;
+    }
+
+    .upload-zone p { color: #64748b; font-size: 14px; margin-top: 8px; }
+    .upload-zone .icon { font-size: 40px; }
+
+    #file-input { display: none; }
+
+    .btn {
+      background: #3b82f6;
+      color: white;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 16px;
+      transition: background 0.2s;
+    }
+
+    .btn:hover { background: #2563eb; }
+    .btn:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+    /* Preview */
+    #preview-section { display: none; }
+
+    #result-image {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+
+    /* Condition banner */
+    #condition-banner {
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    .critical { background: #ef444420; border: 1px solid #ef444440; color: #ef4444; }
+    .poor     { background: #f9731620; border: 1px solid #f9731640; color: #f97316; }
+    .fair     { background: #eab30820; border: 1px solid #eab30840; color: #eab308; }
+    .good     { background: #22c55e20; border: 1px solid #22c55e40; color: #22c55e; }
+
+    /* Detections list */
+    #detections-list { display: flex; flex-direction: column; gap: 8px; }
+
+    .detection-item {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .detection-item .name { font-size: 14px; font-weight: 500; }
+    .detection-item .conf { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+    .severity-pill {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-weight: 500;
+    }
+
+    .pill-critical { background: #ef444420; color: #ef4444; }
+    .pill-high     { background: #f9731620; color: #f97316; }
+    .pill-medium   { background: #eab30820; color: #eab308; }
+    .pill-low      { background: #22c55e20; color: #22c55e; }
+
+    /* Stats row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .stat-box {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .stat-box .value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #3b82f6;
+    }
+
+    .stat-box .label {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 4px;
+    }
+
+    /* Map */
+    #map {
+      height: 300px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+
+    /* Loading spinner */
+    .spinner {
+      display: none;
+      text-align: center;
+      padding: 20px;
+      color: #64748b;
+      font-size: 14px;
+    }
+
+    .full-width { grid-column: 1 / -1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>🛣️</div>
+  <h1>Road Damage Detector</h1>
+  <span>Powered by YOLOv8</span>
+  <div class="badge">● Live</div>
+</header>
+
+<!-- Stats row -->
+<div style="max-width:1200px; margin: 24px auto 0; padding: 0 24px;">
+  <div class="stats-row">
+    <div class="stat-box">
+      <div class="value" id="stat-images">0</div>
+      <div class="label">Images Analyzed</div>
+    </div>
+    <div class="stat-box">
+      <div class="value" id="stat-damages">0</div>
+      <div class="label">Damages Found</div>
+    </div>
+    <div class="stat-box">
+      <div class="value" id="stat-score">—</div>
+      <div class="label">Last Severity Score</div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- LEFT: Upload -->
+  <div class="card">
+    <h2>Upload Road Image</h2>
+
+    <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+      <div class="icon">📷</div>
+      <p>Click to upload or drag & drop</p>
+      <p>JPG, PNG supported</p>
+    </div>
+    <input type="file" id="file-input" accept="image/*"/>
+
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <div style="flex:1;">
+        <label style="font-size:12px; color:#64748b;">Latitude (optional)</label>
+        <input id="lat" type="number" step="any" placeholder="e.g. 6.9271"
+          style="width:100%; margin-top:4px; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#e2e8f0; font-size:13px;"/>
+      </div>
+      <div style="flex:1;">
+        <label style="font-size:12px; color:#64748b;">Longitude (optional)</label>
+        <input id="lng" type="number" step="any" placeholder="e.g. 79.8612"
+          style="width:100%; margin-top:4px; padding:8px; background:#0f172a; border:1px solid #334155; border-radius:6px; color:#e2e8f0; font-size:13px;"/>
+      </div>
+    </div>
+
+    <button class="btn" id="detect-btn" onclick="runDetection()" disabled>
+      Detect Damage
+    </button>
+
+    <div class="spinner" id="spinner">⏳ Analyzing image...</div>
+  </div>
+
+  <!-- RIGHT: Result image -->
+  <div class="card">
+    <h2>Detection Result</h2>
+    <div id="no-result" style="text-align:center; padding:60px 0; color:#334155;">
+      <div style="font-size:48px;">🛣️</div>
+      <p style="margin-top:8px; font-size:14px;">Upload an image to see results</p>
+    </div>
+    <div id="preview-section">
+      <div id="condition-banner"></div>
+      <img id="result-image" src="" alt="Result"/>
+    </div>
+  </div>
+
+  <!-- Detections list -->
+  <div class="card">
+    <h2>Damages Detected</h2>
+    <div id="detections-list">
+      <p style="color:#334155; font-size:14px;">No detections yet.</p>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div class="card">
+    <h2>Damage Heatmap</h2>
+    <div id="map"></div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  // ── State ──────────────────────────────────────────────
+  let selectedFile = null;
+  let totalImages  = 0;
+  let totalDamages = 0;
+  const API = "http://localhost:8000";
+
+  // ── Map setup ──────────────────────────────────────────
+  const map = L.map('map').setView([7.8731, 80.7718], 7); // Sri Lanka
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap'
+  }).addTo(map);
+
+  // ── File input ─────────────────────────────────────────
+  document.getElementById('file-input').addEventListener('change', function() {
+    selectedFile = this.files[0];
+    if (selectedFile) {
+      document.getElementById('detect-btn').disabled = false;
+      const zone = document.getElementById('upload-zone');
+      zone.innerHTML = `<div class="icon">✅</div><p>${selectedFile.name}</p><p>Ready to analyze</p>`;
+    }
+  });
+
+  // Drag and drop
+  const zone = document.getElementById('upload-zone');
+  zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    selectedFile = e.dataTransfer.files[0];
+    document.getElementById('detect-btn').disabled = false;
+    zone.innerHTML = `<div class="icon">✅</div><p>${selectedFile.name}</p><p>Ready to analyze</p>`;
+  });
+
+  // ── Run detection ──────────────────────────────────────
+  async function runDetection() {
+    if (!selectedFile) return;
+
+    // Show spinner
+    document.getElementById('spinner').style.display = 'block';
+    document.getElementById('detect-btn').disabled = true;
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    const lat = document.getElementById('lat').value;
+    const lng = document.getElementById('lng').value;
+    let url = `${API}/detect`;
+    if (lat && lng) url += `?latitude=${lat}&longitude=${lng}`;
+
+    try {
+      const res  = await fetch(url, { method: 'POST', body: formData });
+      const data = await res.json();
+      displayResults(data, lat, lng);
+    } catch (err) {
+      alert('Error connecting to API. Make sure python main.py is running!');
+    } finally {
+      document.getElementById('spinner').style.display = 'none';
+      document.getElementById('detect-btn').disabled = false;
+    }
+  }
+
+  // ── Display results ────────────────────────────────────
+  function displayResults(data, lat, lng) {
+    // Show annotated image
+    document.getElementById('no-result').style.display = 'none';
+    document.getElementById('preview-section').style.display = 'block';
+    document.getElementById('result-image').src = `data:image/jpeg;base64,${data.annotated_image}`;
+
+    // Condition banner
+    const banner = document.getElementById('condition-banner');
+    banner.style.display = 'block';
+    banner.textContent   = `🔍 ${data.condition}  |  Severity Score: ${data.avg_score}/9`;
+    const c = data.condition.toLowerCase();
+    banner.className = c.includes('critical') ? 'critical' :
+                       c.includes('poor')     ? 'poor'     :
+                       c.includes('fair')     ? 'fair'     : 'good';
+
+    // Detections list
+    const list = document.getElementById('detections-list');
+    if (data.detections.length === 0) {
+      list.innerHTML = '<p style="color:#64748b; font-size:14px;">No damage detected in this image.</p>';
+    } else {
+      list.innerHTML = data.detections.map(d => `
+        <div class="detection-item">
+          <div>
+            <div class="name">${d.class}</div>
+            <div class="conf">Confidence: ${(d.confidence * 100).toFixed(0)}%</div>
+          </div>
+          <span class="severity-pill pill-${d.severity.toLowerCase()}">${d.severity}</span>
+        </div>
+      `).join('');
+    }
+
+    // Update stats
+    totalImages++;
+    totalDamages += data.total_damage;
+    document.getElementById('stat-images').textContent  = totalImages;
+    document.getElementById('stat-damages').textContent = totalDamages;
+    document.getElementById('stat-score').textContent   = data.avg_score + '/9';
+
+    // Add map marker if GPS provided
+    if (lat && lng) {
+      const color = data.avg_score >= 7 ? 'red' :
+                    data.avg_score >= 5 ? 'orange' : 'green';
+      const marker = L.circleMarker([parseFloat(lat), parseFloat(lng)], {
+        radius: 10, fillColor: color, color: '#fff',
+        weight: 2, opacity: 1, fillOpacity: 0.8
+      }).addTo(map);
+      marker.bindPopup(`
+        <b>${data.condition}</b><br>
+        Score: ${data.avg_score}/9<br>
+        Damages: ${data.total_damage}
+      `);
+      map.setView([parseFloat(lat), parseFloat(lng)], 13);
+    }
+  }
+</script>
+</body>
+</html>
