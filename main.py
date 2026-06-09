@@ -1,12 +1,10 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 import uvicorn
-import cv2
 import numpy as np
 from ultralytics import YOLO
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
 import os
@@ -14,7 +12,6 @@ import os
 # ── App setup ──────────────────────────────────────────────
 app = FastAPI(title="Road Damage Detector API")
 
-# Allow the frontend to talk to this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,11 +19,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Load your trained model ────────────────────────────────
+# ── Load model ─────────────────────────────────────────────
 MODEL_PATH = "model/best.pt"
 model = YOLO(MODEL_PATH)
 
-# Damage classes from your dataset
 CLASS_NAMES = {
     0: "Alligator Crack",
     1: "Edge Cracking",
@@ -38,7 +34,6 @@ CLASS_NAMES = {
     7: "Pothole"
 }
 
-# Severity score per class (how bad is each damage type)
 SEVERITY = {
     "Pothole":            {"score": 9, "level": "Critical"},
     "Alligator Crack":    {"score": 8, "level": "High"},
@@ -50,43 +45,40 @@ SEVERITY = {
     "Striping":           {"score": 2, "level": "Low"},
 }
 
-# Storage for GPS-tagged detections (heatmap data)
 detections_log = []
 
-# ── Helper: draw boxes on image ────────────────────────────
-def draw_boxes(image_array, results):
-    """Draw coloured bounding boxes on the image."""
+# ── Helper: draw boxes using Pillow (no opencv needed) ─────
+def draw_boxes(image, results):
+    draw = ImageDraw.Draw(image)
+
     color_map = {
-        "Critical": (0, 0, 255),    # Red
-        "High":     (0, 128, 255),  # Orange
-        "Medium":   (0, 255, 255),  # Yellow
-        "Low":      (0, 255, 0),    # Green
+        "Critical": "#FF0000",
+        "High":     "#FF8000",
+        "Medium":   "#FFFF00",
+        "Low":      "#00FF00",
     }
 
     for box in results[0].boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
-        class_id = int(box.cls[0])
+        class_id   = int(box.cls[0])
         confidence = float(box.conf[0])
         class_name = CLASS_NAMES.get(class_id, "Unknown")
-        severity = SEVERITY.get(class_name, {"score": 0, "level": "Low"})
-        color = color_map[severity["level"]]
+        severity   = SEVERITY.get(class_name, {"score": 0, "level": "Low"})
+        color      = color_map[severity["level"]]
 
         # Draw rectangle
-        cv2.rectangle(image_array, (x1, y1), (x2, y2), color, 2)
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
 
         # Draw label background
         label = f"{class_name} {confidence:.0%}"
-        (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-        cv2.rectangle(image_array, (x1, y1 - h - 8), (x1 + w, y1), color, -1)
+        draw.rectangle([x1, y1 - 20, x1 + len(label) * 7, y1], fill=color)
 
         # Draw label text
-        cv2.putText(image_array, label, (x1, y1 - 4),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        draw.text((x1 + 2, y1 - 18), label, fill="black")
 
-    return image_array
+    return image
 
 # ── Routes ─────────────────────────────────────────────────
-
 @app.get("/")
 def home():
     return {"message": "Road Damage Detector API is running!"}
@@ -98,28 +90,21 @@ async def detect(
     latitude: float = None,
     longitude: float = None
 ):
-    """
-    Upload a road image → get back:
-    - annotated image with bounding boxes
-    - list of detected damages with severity scores
-    - overall road condition score
-    """
-    # Read uploaded image
+    # Read image
     contents = await file.read()
     image = Image.open(io.BytesIO(contents)).convert("RGB")
     image_array = np.array(image)
-    image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
 
     # Run detection
-    results = model(image_bgr, conf=0.25)
+    results = model(image_array, conf=0.25)
 
     # Build detections list
     detections = []
     for box in results[0].boxes:
-        class_id = int(box.cls[0])
+        class_id   = int(box.cls[0])
         confidence = float(box.conf[0])
         class_name = CLASS_NAMES.get(class_id, "Unknown")
-        severity = SEVERITY.get(class_name, {"score": 0, "level": "Low"})
+        severity   = SEVERITY.get(class_name, {"score": 0, "level": "Low"})
         x1, y1, x2, y2 = map(int, box.xyxy[0])
 
         detections.append({
@@ -130,7 +115,7 @@ async def detect(
             "bbox":       [x1, y1, x2, y2]
         })
 
-    # Overall road condition (average severity score)
+    # Overall condition
     if detections:
         avg_score = sum(d["score"] for d in detections) / len(detections)
         if avg_score >= 7:
@@ -145,15 +130,15 @@ async def detect(
         avg_score = 0
         condition = "No damage detected"
 
-    # Draw boxes on image
-    annotated = draw_boxes(image_bgr.copy(), results)
-    annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+    # Draw boxes using Pillow
+    annotated = draw_boxes(image.copy(), results)
 
-    # Convert annotated image to base64 so frontend can display it
-    _, buffer = cv2.imencode(".jpg", annotated)
-    img_base64 = base64.b64encode(buffer).decode("utf-8")
+    # Convert to base64
+    buffer = io.BytesIO()
+    annotated.save(buffer, format="JPEG")
+    img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-    # Log GPS data if provided
+    # Log GPS
     if latitude and longitude:
         detections_log.append({
             "lat":        latitude,
@@ -174,13 +159,11 @@ async def detect(
 
 @app.get("/heatmap-data")
 def heatmap_data():
-    """Returns all GPS-tagged detections for the heatmap."""
     return JSONResponse({"points": detections_log})
 
 
 @app.get("/stats")
 def stats():
-    """Quick summary of all detections so far."""
     if not detections_log:
         return {"message": "No detections yet"}
 
@@ -199,6 +182,5 @@ def stats():
     }
 
 
-# ── Run ────────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
