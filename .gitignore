@@ -1,9 +1,6 @@
 # Virtual environment — don't upload this (too large)
 venv/
 
-# Model weights — too large for GitHub
-model/
-
 # Python cache files
 __pycache__/
 *.pyc
